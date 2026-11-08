@@ -1,0 +1,72 @@
+# Збірка програми та інсталятора, самоперевірка, тест встановлення/видалення на Windows, реліз для тегів v*
+name: build
+
+on:
+  push:
+    branches: [main, develop, "feature/**"]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Встановлення Mono і NSIS
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends mono-mcs mono-devel libmono-system-windows-forms4.0-cil nsis
+      - name: Збірка (myapp.exe + MyAppInstaller.exe)
+        run: ./build.sh
+      - name: Самоперевірка логіки програми
+        run: mono app/myapp.exe --selftest
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MyApp
+          path: |
+            app/myapp.exe
+            installer/MyAppInstaller.exe
+
+  test-installer:
+    needs: build
+    runs-on: windows-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: MyApp
+      - name: Тихе встановлення, перевірка, видалення
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Start-Process installer\MyAppInstaller.exe -ArgumentList '/S' -Wait
+          $dir = "$env:ProgramFiles\MyApp"
+          foreach ($f in 'myapp.exe','uninstall.exe','docs\README.md') { if (-not (Test-Path "$dir\$f")) { throw "немає $f" } }
+          if (-not (Test-Path "$env:PUBLIC\Desktop\MyApp.lnk")) { throw 'немає ярлика на робочому столі' }
+          $reg = Get-ItemProperty 'HKLM:\SOFTWARE\MyApp'
+          $un  = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\MyApp'
+          "InstallDir=$($reg.InstallDir); DisplayName=$($un.DisplayName); Version=$($un.DisplayVersion)"
+          Start-Process "$dir\uninstall.exe" -ArgumentList '/S'
+          for ($i = 0; $i -lt 60 -and (Test-Path $dir); $i++) { Start-Sleep -Seconds 1 }
+          if (Test-Path $dir) { throw 'тека програми не видалена' }
+          if (Test-Path "$env:PUBLIC\Desktop\MyApp.lnk") { throw 'ярлик не видалено' }
+          if (Test-Path 'HKLM:\SOFTWARE\MyApp') { throw 'ключ реєстру не видалено' }
+          'Встановлення й видалення пройшли успішно'
+
+  release:
+    needs: test-installer
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: MyApp
+      - name: GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: MyApp ${{ github.ref_name }}
+          body_path: RELEASE_NOTES.md
+          files: installer/MyAppInstaller.exe
