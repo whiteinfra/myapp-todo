@@ -1,0 +1,4 @@
+# результати збірки (публікуються в GitHub Releases)
+app/myapp.exe
+installer/*.exe
+*.tmp

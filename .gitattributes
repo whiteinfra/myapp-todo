@@ -1,0 +1,7 @@
+* text=auto
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.nsi text eol=crlf
+LICENSE.txt text eol=crlf
+*.ico binary
+*.exe binary
